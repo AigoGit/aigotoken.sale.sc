@@ -19,6 +19,7 @@ contract AigoTokensale is Ownable {
     bool delivered;
   }
 
+  event InvestorAdded(address indexed investor);
   event TokensaleFinishTimeChanged(uint256 oldTime, uint256 newTime);
   event Payment(address indexed investor, uint256 weiValue, uint256 baseValue);
   event TokenAmountUpdated(address indexed investor, uint256 tokenAmount);
@@ -32,6 +33,9 @@ contract AigoTokensale is Ownable {
   UserWallet[] public investorList;
   mapping(address => Investor) investors;
 
+  function investorListLength() public view returns (uint) {
+    return investorList.length;
+  }
   function isInvestorSet(address investor) public view returns (bool) {
     return investors[investor].isUserWallet;
   }
@@ -56,9 +60,9 @@ contract AigoTokensale is Ownable {
     require(_token != address(0));
     require(_finishTime > now);
     require(_vaultWallet != address(0));
-
     token = _token;
     finishTime = _finishTime;
+    vaultWallet = _vaultWallet;
   }
 
   function setFinishTime(uint256 _finishTime) public onlyOwner {
@@ -67,25 +71,18 @@ contract AigoTokensale is Ownable {
     emit TokensaleFinishTimeChanged(oldTime, finishTime);
   }
 
-  function() public payable {
+  function postWalletPayment(uint256 value) public {
     require(now < finishTime);
     Investor storage investor = investors[msg.sender];
     require(investor.isUserWallet);
-    investor.payments.push(InvestorPayment(now, msg.value, 0));
+    investor.payments.push(InvestorPayment(now, value, 0));
     investor.tokenAmount = 0;
-    owner.transfer(msg.value);
-    emit Payment(msg.sender, msg.value, 0);
-  }
-
-  function updateTokenAmount(address investorAddress, uint256 tokenAmount) public onlyOwner {
-    Investor storage investor = investors[investorAddress];
-    require(investor.isUserWallet);
-    investor.tokenAmount = tokenAmount;
-    emit TokenAmountUpdated(investorAddress, tokenAmount);
+    emit Payment(msg.sender, value, 0);
   }
 
   function postExternalPayment(address investorAddress, uint256 time, uint256 baseValue, uint256 tokenAmount) public onlyOwner {
     require(investorAddress != address(0));
+    require(time <= now);
     require(now < finishTime);
     require(baseValue > 0);
     Investor storage investor = investors[investorAddress];
@@ -95,11 +92,18 @@ contract AigoTokensale is Ownable {
     emit Payment(msg.sender, 0, baseValue);
   }
 
-  function AddInvestor(address _payoutAddress) public onlyOwner returns (UserWallet) {
-    UserWallet wallet = new UserWallet(_payoutAddress, this);
+  function updateTokenAmount(address investorAddress, uint256 tokenAmount) public onlyOwner {
+    Investor storage investor = investors[investorAddress];
+    require(investor.isUserWallet);
+    investor.tokenAmount = tokenAmount;
+    emit TokenAmountUpdated(investorAddress, tokenAmount);
+  }
+
+  function addInvestor(address _payoutAddress) public onlyOwner {
+    UserWallet wallet = new UserWallet(_payoutAddress, vaultWallet, owner);
     investorList.push(wallet);
     investors[wallet].isUserWallet = true;
-    return wallet;
+    emit InvestorAdded(wallet);
   }
 
   function deliverTokens(uint limit) public onlyOwner {

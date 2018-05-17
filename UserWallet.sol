@@ -10,12 +10,15 @@ contract UserWallet is Ownable {
     using SafeMath for uint256;
 
     address public payoutWallet;
+    address public vaultWallet;
     AigoTokensale public tokensale;
 
-    constructor(address _payoutWallet, AigoTokensale _tokensale) Ownable() public {
-        require(_tokensale != address(0));
-        payoutWallet = _payoutWallet;
-        tokensale = _tokensale;
+    constructor(address _payoutWallet, address _vaultWallet, address _owner) public {
+      require(_vaultWallet != address(0));
+      payoutWallet = _payoutWallet;
+      vaultWallet = _vaultWallet;
+      tokensale = AigoTokensale(msg.sender);
+      owner = _owner;
     }
 
     function onDelivery() public {
@@ -39,7 +42,8 @@ contract UserWallet is Ownable {
     }
 
     function() public payable {
-        address(tokensale).transfer(msg.value);
+        tokensale.postWalletPayment(msg.value);
+        vaultWallet.transfer(msg.value);
     }
 
 }
