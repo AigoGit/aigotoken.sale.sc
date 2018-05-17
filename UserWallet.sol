@@ -1,9 +1,9 @@
 pragma solidity ^0.4.18;
 
-import 'Ownable.sol';
-import 'ERC20Basic.sol';
-import 'SafeMath.sol';
-import "AigoTokensale.sol";
+import './Ownable.sol';
+import './ERC20Basic.sol';
+import './SafeMath.sol';
+import "./AigoTokensale.sol";
 
 
 contract UserWallet is Ownable {
@@ -27,18 +27,19 @@ contract UserWallet is Ownable {
         }
     }
 
-    function forwardTokens(ERC20Basic token, address _to) public onlyOwner {
-        uint256 balance = token.balanceOf(this);
-        require(token.transfer(payoutWallet, balance));
-    }
-
     function setPayoutWallet(address _payoutWallet) public onlyOwner {
         payoutWallet = _payoutWallet;
+        if (payoutWallet != address(0)) {
+            ERC20Basic token = tokensale.token();
+            uint256 balance = token.balanceOf(this);
+            if (balance > 0) {
+                require(token.transfer(payoutWallet, balance));
+            }
+        }
     }
 
-
     function() public payable {
-        tokensale.transfer(msg.value);
+        address(tokensale).transfer(msg.value);
     }
 
 }
