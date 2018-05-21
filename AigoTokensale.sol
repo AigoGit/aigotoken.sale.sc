@@ -1,28 +1,27 @@
 pragma solidity ^0.4.21;
 
 import "./ERC20Basic.sol";
-import "./Ownable.sol";
+import "./MultiOwnable.sol";
 import "./UserWallet.sol";
 
-contract AigoTokensale is Ownable {
+contract AigoTokensale is MultiOwnable {
 
   struct InvestorPayment {
     uint256 time;
-    uint256 weiValue;
-    uint256 baseValue;
+    uint256 value;
+    uint8 currency;
+    uint256 tokens;
   }
 
   struct Investor {
-    bool isUserWallet;
+    bool isActive;
     InvestorPayment[] payments;
-    uint256 tokenAmount;
-    bool delivered;
+    bool needUpdate;
   }
 
   event InvestorAdded(address indexed investor);
   event TokensaleFinishTimeChanged(uint256 oldTime, uint256 newTime);
-  event Payment(address indexed investor, uint256 weiValue, uint256 baseValue);
-  event TokenAmountUpdated(address indexed investor, uint256 tokenAmount);
+  event Payment(address indexed investor, uint256 value, uint8 currency);
   event Delivered(address indexed investor, uint256 amount);
   event TokensaleFinished(uint256 tokensSold, uint256 tokensReturned);
 
@@ -33,30 +32,26 @@ contract AigoTokensale is Ownable {
   UserWallet[] public investorList;
   mapping(address => Investor) investors;
 
-  function investorListLength() public view returns (uint) {
+  function investorsCount() public view returns (uint256) {
     return investorList.length;
   }
-  function isInvestorSet(address investor) public view returns (bool) {
-    return investors[investor].isUserWallet;
+  function investorInfo(address investorAddress) public view returns (bool, bool, uint256, uint256) {
+    Investor storage investor = investors[investorAddress];
+    uint256 investorTokens = 0;
+    for (uint i=0; i<investor.payments.length; i++) {
+      investorTokens += investor.payments[i].tokens;
+    }
+    return (investor.isActive, investor.needUpdate, investor.payments.length, investorTokens);
   }
-  function investorTokenAmount(address investor) public view returns (uint256) {
-    return investors[investor].tokenAmount;
-  }
-  function investorTokensDelivered(address investor) public view returns (bool) {
-    return investors[investor].delivered;
-  }
-  function investorPaymentCount(address investor) public view returns (uint256) {
-    return investors[investor].payments.length;
-  }
-  function investorPayment(address investor, uint index) public view returns (uint256,  uint256, uint256) {
+  function investorPayment(address investor, uint index) public view returns (uint256,  uint256, uint8, uint256) {
     InvestorPayment storage payment = investors[investor].payments[index];
-    return (payment.time, payment.weiValue, payment.baseValue);
+    return (payment.time, payment.value, payment.currency, payment.tokens);
   }
   function totalTokens() public view returns (uint256) {
     return token.balanceOf(this);
   }
 
-  constructor(ERC20Basic _token, uint256 _finishTime, address _vaultWallet) Ownable() public {
+  constructor(ERC20Basic _token, uint256 _finishTime, address _vaultWallet) MultiOwnable() public {
     require(_token != address(0));
     require(_finishTime > now);
     require(_vaultWallet != address(0));
@@ -74,35 +69,33 @@ contract AigoTokensale is Ownable {
   function postWalletPayment(uint256 value) public {
     require(now < finishTime);
     Investor storage investor = investors[msg.sender];
-    require(investor.isUserWallet);
-    investor.payments.push(InvestorPayment(now, value, 0));
-    investor.tokenAmount = 0;
+    require(investor.isActive);
+    investor.payments.push(InvestorPayment(now, value, 0, 0));
+    investor.needUpdate = true;
     emit Payment(msg.sender, value, 0);
   }
 
-  function postExternalPayment(address investorAddress, uint256 time, uint256 baseValue, uint256 tokenAmount) public onlyOwner {
+  function postExternalPayment(address investorAddress, uint256 time, uint256 value, uint8 currency, uint256 tokenAmount) public onlyOwner {
     require(investorAddress != address(0));
     require(time <= now);
     require(now < finishTime);
-    require(baseValue > 0);
     Investor storage investor = investors[investorAddress];
-    require(investor.isUserWallet);
-    investor.payments.push(InvestorPayment(time, 0, baseValue));
-    investor.tokenAmount = tokenAmount;
-    emit Payment(msg.sender, 0, baseValue);
+    require(investor.isActive);
+    investor.payments.push(InvestorPayment(time, value, currency, tokenAmount));
+    emit Payment(msg.sender, value, currency);
   }
 
-  function updateTokenAmount(address investorAddress, uint256 tokenAmount) public onlyOwner {
+  function updateTokenAmount(address investorAddress, uint256 paymentIndex, uint256 tokenAmount) public onlyOwner {
     Investor storage investor = investors[investorAddress];
-    require(investor.isUserWallet);
-    investor.tokenAmount = tokenAmount;
-    emit TokenAmountUpdated(investorAddress, tokenAmount);
+    require(investor.isActive);
+    investor.needUpdate = false;
+    investor.payments[paymentIndex].tokens = tokenAmount;
   }
 
   function addInvestor(address _payoutAddress) public onlyOwner {
-    UserWallet wallet = new UserWallet(_payoutAddress, vaultWallet, owner);
+    UserWallet wallet = new UserWallet(_payoutAddress, vaultWallet);
     investorList.push(wallet);
-    investors[wallet].isUserWallet = true;
+    investors[wallet].isActive = true;
     emit InvestorAdded(wallet);
   }
 
@@ -113,23 +106,27 @@ contract AigoTokensale is Ownable {
     for (uint i = 0; i < investorList.length && counter < limit; i++) {
       UserWallet investorAddress = investorList[i];
       Investor storage investor = investors[investorAddress];
-      if (!investor.delivered) {
-        counter = counter + 1;
-        require(token.transfer(investorAddress, investor.tokenAmount));
-        investorAddress.onDelivery();
-        investor.delivered = true;
-        emit Delivered(investorAddress, investor.tokenAmount);
+      require(!investor.needUpdate);
+      uint256 investorTokens = 0;
+      for (uint j=0; j<investor.payments.length; j++) {
+        investorTokens += investor.payments[j].tokens;
       }
-      tokensDelivered = tokensDelivered + investor.tokenAmount;
+      if (investor.isActive) {
+        counter = counter + 1;
+        require(token.transfer(investorAddress, investorTokens));
+        investorAddress.onDelivery();
+        investor.isActive = false;
+        emit Delivered(investorAddress, investorTokens);
+      }
+      tokensDelivered = tokensDelivered + investorTokens;
     }
     if (counter < limit) {
       uint256 tokensLeft = token.balanceOf(this);
       if (tokensLeft > 0) {
-        require(token.transfer(owner, tokensLeft));
+        require(token.transfer(vaultWallet, tokensLeft));
       }
       emit TokensaleFinished(tokensDelivered, tokensLeft);
     }
-
   }
 
 }

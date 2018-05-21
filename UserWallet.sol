@@ -1,24 +1,22 @@
 pragma solidity ^0.4.18;
 
-import './Ownable.sol';
 import './ERC20Basic.sol';
 import './SafeMath.sol';
 import "./AigoTokensale.sol";
 
 
-contract UserWallet is Ownable {
+contract UserWallet {
     using SafeMath for uint256;
 
     address public payoutWallet;
     address public vaultWallet;
     AigoTokensale public tokensale;
 
-    constructor(address _payoutWallet, address _vaultWallet, address _owner) public {
+    constructor(address _payoutWallet, address _vaultWallet) public {
       require(_vaultWallet != address(0));
       payoutWallet = _payoutWallet;
       vaultWallet = _vaultWallet;
       tokensale = AigoTokensale(msg.sender);
-      owner = _owner;
     }
 
     function onDelivery() public {
@@ -30,7 +28,8 @@ contract UserWallet is Ownable {
         }
     }
 
-    function setPayoutWallet(address _payoutWallet) public onlyOwner {
+    function setPayoutWallet(address _payoutWallet) public {
+        require(tokensale.isOwner(msg.sender));
         payoutWallet = _payoutWallet;
         if (payoutWallet != address(0)) {
             ERC20Basic token = tokensale.token();
